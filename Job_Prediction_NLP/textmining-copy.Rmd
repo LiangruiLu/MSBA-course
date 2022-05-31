@@ -1,0 +1,483 @@
+---
+title: "text mining"
+author: "Ziyi Li"
+date: "5/10/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+dftrain<-read.csv("Real_Fake_Prediction_Cleaned_Train_2.csv")
+dftest<-read.csv("Real_Fake_Prediction_Cleaned_Test_2.csv")
+nrow(dftrain)
+nrow(dftest)
+df<-rbind(dftrain,dftest)
+```
+
+```{r}
+library('e1071')
+library('SparseM')
+library('tm')
+# train
+# SEPARATE TEXT VECTOR TO CREATE Source(),
+# Corpus() CONSTRUCTOR FOR DOCUMENT TERM
+# MATRIX TAKES Source()
+dfvector <- as.vector(df$text)
+
+# CREATE SOURCE FOR VECTORS
+dfsource <- VectorSource(dfvector)
+
+# CREATE CORPUS FOR DATA
+dfcorpus <- Corpus(dfsource)
+
+# PERFORMING THE VARIOUS TRANSFORMATIONS on "traincorpus" and "testcorpus" DATASETS 
+# SUCH AS TRIM WHITESPACE, REMOVE PUNCTUATION, REMOVE STOPWORDS.
+dfcorpus <- tm_map(dfcorpus,content_transformer(stripWhitespace))
+dfcorpus <- tm_map(dfcorpus,content_transformer(tolower))
+dfcorpus <- tm_map(dfcorpus, content_transformer(removeWords),stopwords("english"))
+dfcorpus <- tm_map(dfcorpus,content_transformer(removePunctuation))
+dfcorpus <- tm_map(dfcorpus,content_transformer(removeNumbers))
+
+tdm <- TermDocumentMatrix(dfcorpus)
+tdm = removeSparseTerms(tdm, 0.95)
+dtm_matrix <- t(tdm)
+dtm <- data.frame(df$fraudulent,as.matrix(dtm_matrix))
+```
+```{r}
+dtm$nocompanylogo<-NULL
+dtm$noquestions<-NULL
+dtm$salarynotavailable<-NULL
+```
+
+
+
+
+
+```{r}
+
+traindata <- dtm[1:13410,]
+testdata <- dtm[13411:17880,]
+
+traindata_fct <- traindata
+testdata_fct <- testdata
+traindata_fct$df.fraudulent<-as.factor(traindata_fct$df.fraudulent)
+testdata_fct$df.fraudulent<-as.factor(testdata_fct$df.fraudulent)
+
+```
+naive bayes
+===========
+```{r}
+library('e1071')
+# naive bayes
+traindata_nb<-traindata_fct
+testdata_nb<-testdata_fct
+
+
+fit_nb <- naiveBayes(traindata_nb[,-1],traindata_nb[,1])
+# PREDICTION
+prediction_nb <- predict(fit_nb,testdata_nb[,-1])
+prob_nb<-predict(fit_nb,newdata=testdata_nb[,-1],type="raw")[,2]
+(table_nb = table(testdata_nb[,1],prediction_nb))
+(accuracy=(table_nb[1,1]+table_nb[2,2])/(table_nb[1,1]+table_nb[2,2]+table_nb[1,2]+table_nb[2,1]))
+
+
+
+```
+
+random forest
+=============
+
+```{r}
+#random forest
+traindata_rf<-traindata_fct
+testdata_rf<-testdata_fct
+
+
+library(randomForest)
+set.seed(12345)
+fit_rf = randomForest(df.fraudulent ~ ., data=traindata_rf)
+prediction_rf = predict(fit_rf, newdata=testdata_rf,mtry=27,importance=TRUE)
+
+
+```
+```{r}
+prob_rf = predict(fit_rf, newdata=testdata_rf,type="prob")[,2]
+table_rf<-table(testdata_rf$df.fraudulent, prediction_rf)
+table_rf
+```
+
+
+
+```{r}
+# importance
+imp <- as.data.frame(importance(fit_rf))
+imp <- data.frame(MeanDecreaseGini = imp$MeanDecreaseGini,
+            terms= rownames(imp))
+imp[order(imp$MeanDecreaseGini,decreasing = T),]
+```
+
+
+
+
+```{r}
+head(importance(fit_rf))
+varImpPlot(fit_rf)
+```
+
+
+association rule
+================
+```{r}
+traindata_rule<-traindata
+testdata_rule<-testdata
+
+traindata_rule_bi <- as.data.frame(ifelse(traindata_rule>=1,1,0))
+#traindata_rule_bi
+```
+```{r}
+library(arules)
+library(arulesViz)
+m<-as.matrix(traindata_rule_bi)
+m<-apply(m,1:2,function(x) ifelse(x==1,TRUE,FALSE))
+T<-as(m,"transactions")
+#inspect(T[1:20])
+#itemFrequencyPlot(T)
+```
+```{r}
+rules<-apriori(data=T, parameter=list(supp=0.025,conf = 0.08), appearance = list(default="lhs",rhs="df.fraudulent"),control = list(verbose=F))
+rules<-sort(rules, by="confidence", decreasing=TRUE)
+inspect(rules)
+#summary(rules)
+#library(arulesViz)
+#plot(rules)
+#plot(rules, measure=c("support", "lift"), shading="confidence")
+```
+```{r}
+prediction_rule <- ifelse((testdata_rule$noquestions>=1 & testdata_rule$nocompanylogo>=1 & testdata_rule$noprofile>=1),1,0)
+
+(table_asso=table(testdata_rule$df.fraudulent,prediction_rule))
+(accuracy=(table_asso[1,1]+table_asso[2,2])/(table_asso[1,1]+table_asso[2,2]+table_asso[1,2]+table_asso[2,1]))
+```
+
+
+knn(don't know k)
+=================
+```{r}
+traindata_knn<-traindata_fct
+testdata_knn<-testdata_fct
+# knn() may be found in the library class
+library(class)
+# target variable is in 5th column 
+train_input <- as.matrix(traindata_knn[,-1])
+train_output <- as.vector(traindata_knn[,1])
+test_input <- as.matrix(testdata_knn[,-1])
+
+
+prediction_knn <- knn(train_input, test_input,train_output, k=2)
+table_knn<- table(testdata_knn$df.fraudulent,prediction_knn)
+table_knn
+
+
+```
+kknn
+====
+
+```{r}
+library(kknn)
+traindata_knn<-traindata_fct
+testdata_knn<-testdata_fct
+fit_kknn_2<-train.kknn(df.fraudulent~.,data=traindata_knn,distance=2,kmax=25,kernel="rectangular")
+summary(fit_kknn_2)
+
+fit_kknn<-kknn(df.fraudulent~., traindata_knn,testdata_knn,distance=2, k=2,kernel="rectangular")
+prediction_kknn<-fitted(fit_kknn)
+actual<-testdata_knn$df.fraudulent
+table_kknn<-table(actual,prediction_kknn)
+table_kknn
+
+```
+
+```{r}
+prob_kknn<-fit_kknn$prob[,2]
+```
+
+
+
+```{r}
+plot(fit_kknn_2,type="o",col="blue")
+```
+
+knn cross validation
+====================
+
+
+```{r}
+df_kknn_cv<-rbind(traindata_knn,testdata_knn)
+fit_kknn_cv<-cv.kknn(df.fraudulent~.,data=df_kknn_cv,distance=2,kcv=10,k=2,kernel="rectangular")
+
+```
+
+```{r}
+prediction_kknn_cv<-fit_kknn_cv
+d<-data.frame(prediction_kknn_cv[[1]])
+table_kknn_cv<-table(d$y,d$yhat)
+table_kknn_cv
+
+```
+```{r}
+library(caret)
+(sen_kknn_cv<-sensitivity(table_kknn_cv))
+(spe_kknn_cv<-specificity(table_kknn_cv))
+(acc_kknn_cv<-(table_kknn_cv[1,1]+table_kknn_cv[2,2])/sum(table_kknn_cv))
+
+
+```
+
+cart
+====
+```{r}
+traindata_tree<-traindata_fct
+testdata_tree<-testdata_fct
+library(tree)
+fit_tree<-tree(df.fraudulent~.,data=traindata_tree)
+summary(fit_tree)
+
+```
+```{r}
+
+prediction_tree<-predict(fit_tree,testdata_tree,type="class")
+prob_tree=predict(fit_tree,testdata_tree,type="vector")[,2]
+table_tree<-table(testdata_tree$df.fraudulent,prediction_tree)
+table_tree
+acc_tree<-(table_tree[1,1]+table_tree[2,2])/(table_tree[1,1]+table_tree[2,2]+table_tree[1,2]+table_tree[2,1])
+acc_tree  
+```
+```{r}
+plot(fit_tree)
+text(fit_tree,pretty=0)
+```
+
+```{r}
+size<-1:18
+error<-rep(0,length(size))
+T<-table(testdata_tree$df.fraudulent)
+error[1]<-min(T)/nrow(testdata_tree)
+
+
+for (i in 2:18){
+  prune.tree=prune.misclass(fit_tree,best=i)
+  prediction_tree<-predict(prune.tree,testdata_tree,type="class")
+  table_prune<-table(testdata_tree$df.fraudulent,prediction_tree)
+  error[i]<-(table_prune[1,2]+table_prune[2,1])/sum(table_prune)
+}
+plot(size,error, type="o",xlab="Tree size",ylab="Error rate",col="blue")
+z=which.min(error)
+```
+
+
+
+```{r}
+fit_prune_tree<-prune.misclass(fit_tree,best=z)
+plot(fit_prune_tree)
+text(fit_prune_tree,pretty=0)
+prediction_prune_tree=predict(fit_prune_tree,testdata_tree,type="class")
+(table_prune_tree=table(testdata_tree$df.fraudulent,prediction_prune_tree))
+prob_prune_tree=predict(fit_prune_tree,testdata_tree,type="vector")[,2]
+```
+
+
+predictions
+===========
+```{r}
+df_prediction <- data.frame(Actual=testdata$df.fraudulent,
+                            nb_prediction=prediction_nb,
+                            rf_prediction=prediction_rf,
+                            rules_prediction=prediction_rule,
+                            knn_prediction=prediction_kknn,
+                            tree_prediction=prediction_tree )
+
+```
+
+```{r}
+library(writexl)
+write_xlsx(df_prediction,"predictions.xlsx")
+```
+
+accuracy
+========
+
+```{r}
+(sen_nb<-table_nb[2,2]/sum(table_nb[2,]))
+(spe_nb<-table_nb[1,1]/sum(table_nb[1,]))
+(acc_nb<-(table_nb[1,1]+table_nb[2,2])/sum(table_nb))
+```
+
+
+
+
+```{r}
+(sen_rf<-table_rf[2,2]/sum(table_rf[2,]))
+(spe_rf<-table_rf[1,1]/sum(table_rf[1,]))
+(acc_rf<-(table_rf[1,1]+table_rf[2,2])/sum(table_rf))
+```
+
+
+```{r}
+table_rule<-table_asso
+(sen_rule<-table_rule[2,2]/sum(table_rule[2,]))
+(spe_rule<-table_rule[1,1]/sum(table_rule[1,]))
+(acc_rule<-(table_rule[1,1]+table_rule[2,2])/sum(table_rule))
+
+```
+
+```{r}
+(sen_knn<-table_kknn[2,2]/sum(table_kknn[2,]))
+(spe_knn<-table_kknn[1,1]/sum(table_kknn[1,]))
+(acc_knn<-(table_kknn[1,1]+table_kknn[2,2])/sum(table_kknn))
+```
+
+```{r}
+(sen_tree<-table_prune_tree[2,2]/sum(table_prune_tree[2,]))
+(spe_tree<-table_prune_tree[1,1]/sum(table_prune_tree[1,]))
+(acc_tree<-(table_prune_tree[1,1]+table_prune_tree[2,2])/sum(table_prune_tree))
+```
+
+
+```{r}
+(sen_kknn_cv<-table_kknn_cv[2,2]/sum(table_kknn_cv[2,]))
+(spe_kknn_cv<-table_kknn_cv[1,1]/sum(table_kknn_cv[1,]))
+(acc_kknn_cv<-(table_kknn_cv[1,1]+table_kknn_cv[2,2])/sum(table_kknn_cv))
+```
+
+
+roc
+===
+
+```{r}
+library(pROC)
+actualclass_test<-testdata_fct$df.fraudulent
+par(pty="s")
+roc_rose <- plot(roc(actualclass_test, prob_nb),print.auc = TRUE, legacy.axes=TRUE,col = "green")
+add=TRUE
+## Next, the additional argument "add = TRUE" adds the test ROC to the previous plot
+roc_rose <- plot(roc(actualclass_test, prob_rf), print.auc = TRUE,  col = "black", print.auc.y = .2, add = TRUE)
+add=TRUE
+## Next, the additional argument "add = TRUE" adds the test ROC to the previous plot
+roc_rose <- plot(roc(actualclass_test, prob_kknn), print.auc = TRUE,  col = "red", print.auc.y = .4, add = TRUE)
+add=TRUE
+## Next, the additional argument "add = TRUE" adds the test ROC to the previous plot
+roc_rose <- plot(roc(actualclass_test, prob_prune_tree), print.auc = TRUE,  col = "blue", print.auc.y = .3, add = TRUE)
+
+
+
+```
+lift chart
+==========
+
+```{r}
+#lift chart
+actual<-testdata$df.fraudulent
+
+# Create a data frame with the probability and the actual class
+# Then sort it and save as a new data frame
+df1 <- data.frame(prob_nb,actual)
+df1S <- df2[order(-prob_nb),] ## Sorted by probability (descending)
+df1S$Gains <- cumsum(df1S$actual)
+plot(df1S$Gains,type="n",main="Naive Bayes test data Lift Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df1S$Gains)
+abline(0,sum(df1S$actual)/nrow(df1S),lty = 2, col="red")
+
+# Create a data frame with the probability and the actual class
+# Then sort it and save as a new data frame
+df2 <- data.frame(prob_rf,actual)
+df2S <- df2[order(-prob_rf),] ## Sorted by probability (descending)
+df2S$Gains <- cumsum(df2S$actual)
+plot(df2S$Gains,type="n",main="Random Forest test data Lift Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df2S$Gains)
+abline(0,sum(df2S$actual)/nrow(df2S),lty = 2, col="red")
+
+# Create a data frame with the probability and the actual class
+# Then sort it and save as a new data frame
+df3 <- data.frame(prob_kknn,actual)
+df3S <- df2[order(-prob_kknn),] ## Sorted by probability (descending)
+df3S$Gains <- cumsum(df3S$actual)
+plot(df3S$Gains,type="n",main="KNN test data Lift Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df3S$Gains)
+abline(0,sum(df3S$actual)/nrow(df3S),lty = 2, col="red")
+
+# Create a data frame with the probability and the actual class
+# Then sort it and save as a new data frame
+df4 <- data.frame(prob_prune_tree,actual)
+df4S <- df2[order(-prob_prune_tree),] ## Sorted by probability (descending)
+df4S$Gains <- cumsum(df4S$actual)
+plot(df4S$Gains,type="n",main="CART test data Lift Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df4S$Gains)
+abline(0,sum(df4S$actual)/nrow(df4S),lty = 2, col="red")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+word cloud
+==========
+
+```{r}
+## Word Cloud
+#dtm_df
+ratio <- rep(0,ncol(traindata))
+for (i in 1:ncol(traindata)){
+  ratio_fake=sum(traindata[which(traindata$df.fraudulent=='1'),i])/nrow(traindata[which(traindata$df.fraudulent=='1'),])
+  ratio_real=sum(traindata[which(traindata$df.fraudulent=='0'),i])/nrow(traindata[which(traindata$df.fraudulent=='0'),])
+  ratio[i] <- ratio_fake/ratio_real
+}
+
+
+```
+```{r}
+ratio <- as.data.frame(ratio)
+b <- as.data.frame(colnames(traindata))
+a <- cbind(b,ratio)
+a<-a[-1,]
+a<-a[order(a$ratio,decreasing=T),]
+head(a)
+```
+
+```{r}
+# library
+library(wordcloud2) 
+# Change the shape:
+my_graph<-wordcloud2(a, size = 0.3, shape = 'star')
+
+# save it in html
+library("htmlwidgets")
+library(webshot)
+saveWidget(my_graph,"tmp.html",selfcontained = F)
+
+# and in png or pdf
+webshot("tmp.html","fig_1.pdf", delay =5, vwidth = 1800, vheight=1200)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,62 @@
+---
+title: "ML_Model_and_Vote"
+author: "Jiashu Wang"
+date: "5/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readxl)
+
+allpred <- read_excel("predictions.xlsx")
+head(allpred)
+```
+```{r}
+#Naive Bayes
+(table_nb <- table(allpred$Actual,allpred$nb_prediction))
+(acc_nb <- (table_nb[1,1]+table_nb[2,2])/sum(table_nb))
+(sen_nb <- table_nb[2,2]/sum(table_nb[2,]))
+(spe_nb <- table_nb[1,1]/sum(table_nb[1,]))
+```
+
+```{r}
+#Random Forest
+(table_rf <- table(allpred$Actual,allpred$rf_prediction))
+(acc_rf <- (table_rf[1,1]+table_rf[2,2])/sum(table_rf))
+(sen_rf <- table_rf[2,2]/sum(table_rf[2,]))
+(spe_rf <- table_rf[1,1]/sum(table_rf[1,]))
+```
+```{r}
+#Association Rules
+(table_rule <- table(allpred$Actual,allpred$rules_prediction))
+(acc_rule <- (table_rule[1,1]+table_rule[2,2])/sum(table_rule))
+(sen_rule <- table_rule[2,2]/sum(table_rule[2,]))
+(spe_rule <- table_rule[1,1]/sum(table_rule[1,]))
+```
+```{r}
+#K Nearest Neighbor
+(table_knn <- table(allpred$Actual,allpred$knn_prediction))
+(acc_knn <- (table_knn[1,1]+table_knn[2,2])/sum(table_knn))
+(sen_knn <- table_knn[2,2]/sum(table_knn[2,]))
+(spe_knn <- table_knn[1,1]/sum(table_knn[1,]))
+```
+```{r}
+#Classification Tree
+(table_tree <- table(allpred$Actual,allpred$tree_prediction))
+(acc_tree <- (table_tree[1,1]+table_tree[2,2])/sum(table_tree))
+(sen_tree <- table_tree[2,2]/sum(table_tree[2,]))
+(spe_tree <- table_tree[1,1]/sum(table_tree[1,]))
+```
+
+```{r}
+(table_Bi <- table(allpred$Actual,allpred$Bi_LSTM_Predict))
+(acc_Bi <- (table_Bi[1,1]+table_Bi[2,2])/sum(table_Bi))
+(sen_Bi <- table_Bi[2,2]/sum(table_Bi[2,]))
+(spe_Bi <- table_Bi[1,1]/sum(table_Bi[1,]))
+```
+
